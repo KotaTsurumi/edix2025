@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>自動計算ツール（印刷対応）</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f4f7fc;
+      padding: 30px;
+      color: #333;
+    }
+    .container {
+      max-width: 1100px;
+      margin: auto;
+      background: #fff;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 0 12px rgba(0,0,0,0.1);
+    }
+    h1, h2 {
+      color: #2c3e50;
+      margin-top: 40px;
+      border-bottom: 2px solid #4a90e2;
+      padding-bottom: 5px;
+    }
+    .form-row {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    .form-group {
+      flex: 1;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: bold;
+    }
+    input[type="number"], input[type="text"], textarea {
+      width: 100%;
+      padding: 10px;
+      font-size: 16px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+    button {
+      padding: 10px 20px;
+      font-weight: bold;
+      background-color: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 25px 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    th, td {
+      padding: 12px 10px;
+      border: 1px solid #ddd;
+      text-align: left;
+    }
+    th {
+      background: #4a90e2;
+      color: white;
+    }
+    tr:nth-child(even) {
+      background: #f9f9f9;
+    }
+    .highlight {
+      color: #e53935;
+      font-weight: bold;
+    }
+    .total-container {
+      background: #ecf5ff;
+      padding: 20px;
+      border-radius: 10px;
+      font-size: 24px;
+      font-weight: bold;
+      color: #2c3e50;
+      text-align: center;
+      margin-top: 40px;
+    }
+    .subtotal-container {
+      background: #f0f8ff;
+      padding: 15px;
+      border-radius: 8px;
+      font-size: 20px;
+      font-weight: bold;
+      color: #2c3e50;
+      text-align: right;
+      margin: 10px 0 30px;
+    }
+
+    /* 印刷プレビュー専用 */
+    @media print {
+      body * {
+        visibility: hidden;
+      }
+      #printContent, #printContent * {
+        visibility: visible;
+      }
+      #printContent {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        padding: 30px;
+        background: white;
+        color: black;
+      }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>自動計算ツール</h1>
+
+  <!-- 学校数・教員数 -->
+  <div class="form-row">
+    <div class="form-group">
+      <label for="schoolCount">学校数</label>
+      <input type="number" id="schoolCount" min="0" oninput="updateTeacherCount()">
+    </div>
+    <div class="form-group">
+      <label for="teacherCount">教員数（学校数 × 40）</label>
+      <input type="number" id="teacherCount" min="0" oninput="calculate()">
+    </div>
+  </div>
+
+  <!-- 宛先入力欄 -->
+  <div class="form-row">
+    <div class="form-group">
+      <label for="clientName">宛先（印刷時に「御中」付きで表示）</label>
+      <input type="text" id="clientName" value="〇〇市教育委員会">
+    </div>
+    <div class="form-group">
+      <label>&nbsp;</label>
+      <button onclick="generatePrintPreview()">見積書プレビュー</button>
+    </div>
+  </div>
+
+<!-- 印刷用見積書出力領域 -->
+<div id="printContent" style="display:none;"></div>
+
+<script>
+function generatePrintPreview() {
+  const schoolCount = parseInt(document.getElementById("schoolCount").value) || 0;
+  const teacherCount = parseInt(document.getElementById("teacherCount").value) || 0;
+  const clientName = document.getElementById("clientName").value || "御中";
+  const date = new Date().toLocaleDateString('ja-JP');
+  const issuer = "ユニアデックス株式会社";
+  const note = "上記金額は概算見積となります。";
+
+  const items = [];
+
+  // ライセンス
+  if (document.getElementById("saseCheckbox").checked)
+    items.push({ section: "ライセンス", name: "SASE", unit: 40000, qty: teacherCount });
+  if (document.getElementById("m365Checkbox").checked)
+    items.push({ section: "ライセンス", name: "M365 A3", unit: 10000, qty: teacherCount });
+  for (let i = 1; i <= 6; i++) {
+    if (document.getElementById(`additionalCheckbox${i}`).checked) {
+      const name = document.querySelector(`#additionalCheckbox${i}`).parentElement.nextElementSibling.textContent.trim();
+      items.push({ section: "ライセンス", name, unit: 10000, qty: teacherCount });
+    }
+  }
+
+  // 構築
+  if (document.getElementById("buildBasic").checked)
+    items.push({ section: "構築", name: "基本費用", unit: getBaseUnit(), qty: 1 });
+  if (document.getElementById("buildDeploy").checked)
+    items.push({ section: "構築", name: "拠点展開", unit: 2000000, qty: schoolCount });
+  if (document.getElementById("buildCircuit").checked)
+    items.push({ section: "構築", name: "回線", unit: 5000000, qty: schoolCount });
+  for (let i = 1; i <= 6; i++) {
+    if (document.getElementById(`buildAdd${i}`).checked) {
+      const name = document.querySelector(`#buildAdd${i}`).parentElement.nextElementSibling.textContent.trim() + "（構築）";
+      items.push({ section: "構築", name, unit: 3000000, qty: 1 });
+    }
+  }
+
+  // オプション
+  if (document.getElementById("nwRenewalCheckbox").checked)
+    items.push({ section: "オプション", name: "NW更改費用", unit: 20000000, qty: schoolCount });
+
+  // セクションごとにテーブルを作成
+  let html = `
+    <h2>見積書</h2>
+    <p>宛先：${clientName} 御中</p>
+    <p>発行日：${date}</p>
+    <p>発行者：${issuer}</p>
+    <p>備考：${note}</p>
+  `;
+
+  let grandTotal = 0;
+  const sections = ["ライセンス", "構築", "オプション"];
+  sections.forEach(section => {
+    const sectionItems = items.filter(i => i.section === section);
+    if (sectionItems.length === 0) return;
+
+    let rows = "";
+    let subtotal = 0;
+    sectionItems.forEach(item => {
+      const sum = item.unit * item.qty;
+      subtotal += sum;
+      rows += `<tr><td>${item.name}</td><td>¥${item.unit.toLocaleString()}</td><td>${item.qty}</td><td>¥${sum.toLocaleString()}</td></tr>`;
+    });
+    grandTotal += subtotal;
+
+    html += `
+      <h3>【${section}】</h3>
+      <table style="width:100%; border-collapse: collapse; margin-bottom: 20px;" border="1" cellpadding="5">
+        <thead style="background:#f0f0f0;"><tr><th>項目名</th><th>単価</th><th>数量</th><th>合計</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td colspan="3" style="text-align:right;font-weight:bold;">小計</td><td>¥${subtotal.toLocaleString()}</td></tr></tfoot>
+      </table>
+    `;
+  });
+
+  html += `<h2 style="text-align:right;">合計：¥${grandTotal.toLocaleString()}</h2>`;
+
+  const printDiv = document.getElementById("printContent");
+  printDiv.innerHTML = html;
+  printDiv.style.display = "block";
+
+  // 印刷を呼び出す
+  window.print();
+}
+</script>
+
+<script>
+function updateTeacherCount() {
+  const schoolCount = parseInt(document.getElementById('schoolCount').value) || 0;
+  document.getElementById('teacherCount').value = schoolCount * 40;
+  calculate();
+}
+
+function calculate() {
+  const schoolCount = parseInt(document.getElementById('schoolCount').value) || 0;
+  const teacherCount = parseInt(document.getElementById('teacherCount').value) || 0;
+  let licenseTotal = 0;
+  let buildTotal = 0;
+  let optionTotal = 0;
+
+  const saseTotal = document.getElementById('saseCheckbox').checked ? 40000 * teacherCount : 0;
+  document.getElementById('saseTeacherCount').textContent = teacherCount;
+  document.getElementById('saseTotal').textContent = `¥${saseTotal.toLocaleString()}`;
+  licenseTotal += saseTotal;
+
+  const m365Total = document.getElementById('m365Checkbox').checked ? 10000 * teacherCount : 0;
+  document.getElementById('m365TeacherCount').textContent = teacherCount;
+  document.getElementById('m365Total').textContent = `¥${m365Total.toLocaleString()}`;
+  licenseTotal += m365Total;
+
+  for (let i = 1; i <= 6; i++) {
+    const lic = document.getElementById(`additionalCheckbox${i}`);
+    const build = document.getElementById(`buildAdd${i}`);
+    const checked = lic.checked;
+    build.checked = checked;
+
+    const licCost = checked ? 10000 * teacherCount : 0;
+    document.getElementById(`additionalTeacherCount${i}`).textContent = teacherCount;
+    document.getElementById(`additionalTotal${i}`).textContent = `¥${licCost.toLocaleString()}`;
+    licenseTotal += licCost;
+
+    const buildQty = build.checked ? 1 : 0;
+    const buildCost = build.checked ? 3000000 : 0;
+    document.getElementById(`addBuildCount${i}`).textContent = buildQty;
+    document.getElementById(`addBuildTotal${i}`).textContent = `¥${buildCost.toLocaleString()}`;
+    buildTotal += buildCost;
+  }
+
+  const baseBox = document.getElementById('buildBasic');
+  let baseUnit = getBaseUnit();
+  const baseTotal = baseBox.checked ? baseUnit : 0;
+  document.getElementById('baseUnit').textContent = `¥${baseUnit.toLocaleString()}`;
+  document.getElementById('baseTotal').textContent = `¥${baseTotal.toLocaleString()}`;
+  buildTotal += baseTotal;
+
+  const deployTotal = document.getElementById('buildDeploy').checked ? 2000000 * schoolCount : 0;
+  const circuitTotal = document.getElementById('buildCircuit').checked ? 5000000 * schoolCount : 0;
+  document.getElementById('siteDeployCount').textContent = schoolCount;
+  document.getElementById('siteDeployTotal').textContent = `¥${deployTotal.toLocaleString()}`;
+  document.getElementById('circuitCount').textContent = schoolCount;
+  document.getElementById('circuitTotal').textContent = `¥${circuitTotal.toLocaleString()}`;
+  buildTotal += deployTotal + circuitTotal;
+
+  const nwTotal = document.getElementById('nwRenewalCheckbox').checked ? 20000000 * schoolCount : 0;
+  document.getElementById('nwRenewalSchoolCount').textContent = schoolCount;
+  document.getElementById('nwRenewalTotal').textContent = `¥${nwTotal.toLocaleString()}`;
+  optionTotal += nwTotal;
+
+  const total = licenseTotal + buildTotal + optionTotal;
+  document.getElementById('totalCost').textContent = `合計: ¥${total.toLocaleString()}`;
+}
+
+function syncFromBuild(i) {
+  const build = document.getElementById(`buildAdd${i}`);
+  const lic = document.getElementById(`additionalCheckbox${i}`);
+  lic.checked = build.checked;
+  calculate();
+}
+
+function getBaseUnit() {
+  const schoolCount = parseInt(document.getElementById('schoolCount').value) || 0;
+  if (schoolCount <= 20) return 50000000;
+  else if (schoolCount <= 40) return 100000000;
+  else return 200000000;
+}
+</script>
+</body>
+</html>
